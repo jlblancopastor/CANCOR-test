@@ -91,7 +91,7 @@ cca <- CCorA(as.matrix(env_data_sc), as.matrix(pheno_data_sc), stand.Y=FALSE, st
 ``` 
 
 ```{r cc2}
-load("my/working/directory/adegenet_reduced.RData") #We load cluster membership info, here I used adegenet to create clusters.
+load("my/working/directory/adegenet_reduced.RData") #We load cluster membership info, here I used adegenet to create clusters. # Available from the Dryad Digital Repository, https://doi.org/10.5061/dryad.0p2ngf1xk
 levels(dapc2$grp) <- c("cluster1","cluster2","cluster3","cluster4","cluster5","cluster6","cluster7")
 foo <- dapc2$grp
 foo <- as.character.factor(foo)
