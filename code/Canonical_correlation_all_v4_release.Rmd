@@ -1,0 +1,638 @@
+---
+title: "Canonical correlation"
+author: "José Luis Blanco Pastor"
+date: "17 August 2020"
+output: html_document
+---
+```{r setup}
+require("knitr")
+
+knitr::opts_knit$set(cache = TRUE)
+
+# Load r libraries
+library(vegan)
+library(bayou)
+library(dplyr)
+library(reshape2)
+library(robust)
+library(qvalue)
+library(ggplot2)
+library(qdap)
+library(ggtree)
+
+
+# We first set the working directory
+opts_knit$set(root.dir = "my/working/directory")
+options(scipen = 999)
+```
+
+```{r env_data, eval=FALSE, include=FALSE}
+### Load env_data data 
+env_data <- read.csv2("./data/env_data_NewNames.csv", header = T, row.names = 1)
+```
+
+```{r scale_env_data}
+env_data_sc <- scale(env_data)
+
+# check that we get mean of 0 and sd of 1
+colMeans(env_data_sc, na.rm = T)  # faster version of apply(scaled.dat, 2, mean)
+apply(env_data_sc, 2, sd, na.rm = T)
+```
+
+```{r pheno_data}
+### Load phenotype data 
+pheno_data <-read.csv2("./data/pheno_data_NewNames.csv", header =T, as.is=T, dec=",", sep=";", check.names = T, row.names = 1)
+
+```
+
+```{r escale_pheno_data}
+pheno_data_sc <- scale(pheno_data)
+
+# check that we get mean of 0 and sd of 1
+colMeans(pheno_data_sc, na.rm = T)  # faster version of apply(scaled.dat, 2, mean)
+apply(pheno_data_sc, 2, sd, na.rm = T)
+```
+
+```{r Impute_missing_data, eval=FALSE, include=FALSE}
+#Calculate overall percentage of missing data
+NAs <- sum(is.na(env_data_sc[,]))
+Non_Nas <- sum(!is.na(env_data_sc[,]))
+(NAs/(Non_Nas+NAs))*100
+#Impute missing data with mean values across populations
+for(i in 1:ncol(env_data_sc)){
+  env_data_sc[is.na(env_data_sc[,i]), i] <- mean(env_data_sc[,i], na.rm = TRUE)
+}
+#Calculate overall percentage of missing data
+NAs <- sum(is.na(env_data_sc[,]))
+Non_Nas <- sum(!is.na(env_data_sc[,]))
+(NAs/Non_Nas)*100
+```
+
+```{r Impute_missing_data2, eval=FALSE, include=FALSE}
+#Calculate overall percentage of missing data
+NAs <- sum(is.na(pheno_data_sc[,]))
+Non_Nas <- sum(!is.na(pheno_data_sc[,]))
+(NAs/(NAs+Non_Nas))*100
+#Impute missing data with mean values across populations
+for(i in 1:ncol(pheno_data_sc)){
+  pheno_data_sc[is.na(pheno_data_sc[,i]), i] <- mean(pheno_data_sc[,i], na.rm = TRUE)
+}
+#Calculate overall percentage of missing data
+NAs <- sum(is.na(pheno_data_sc[,]))
+Non_Nas <- sum(!is.na(pheno_data_sc[,]))
+(NAs/Non_Nas)*100
+```
+
+```{r cc}
+### Canonical correlation 
+
+cca <- CCorA(as.matrix(env_data_sc), as.matrix(pheno_data_sc), stand.Y=FALSE, stand.X=FALSE)
+# biplot(cca, plot.type = "biplots")
+``` 
+
+```{r cc2}
+load("my/working/directory/adegenet_reduced.RData") #We load cluster membership info, here I used adegenet to create clusters.
+levels(dapc2$grp) <- c("cluster1","cluster2","cluster3","cluster4","cluster5","cluster6","cluster7")
+foo <- dapc2$grp
+foo <- as.character.factor(foo)
+foo <-foo[-c(456)] #Population not used in this study.
+foo <- as.factor(foo)
+rm(dapc2)
+
+colorby <- foo
+bg <- c("#696969", "#E69F00", "#56B4E9", "#009E73","#CC79A7", "#F0E442","#D55E00") # colors of our clusters
+
+par(pty="s")
+plot(cca$Cx[,c(1,2)], asp = 1, cex=0.5, lwd =.2)
+points(cca$Cx[,c(1,2)], pch=21, cex=0.5, col="gray32", bg=bg[colorby], lwd =.2) # the Lperenne populations
+
+biplot(x=cca, plot.type = "variables", col.Y = "indianred3", col.X = "#0868ac", cex = c(1,0.2), plot.axes = c(1,2), int=0.9)
+
+View(sort(abs(cca$corr.Y.Cy[,1]), decreasing = T))
+View(sort(abs(cca$corr.Y.Cy[,2]), decreasing = T))
+
+View(sort(abs(cca$corr.X.Cx[,1]), decreasing = T))
+View(sort(abs(cca$corr.X.Cx[,2]), decreasing = T))
+
+write.csv2(cca$corr.X.Cx[,1:2], "./data/cca_pop_correlations_pheno.csv", row.names = T)
+write.csv2(cca$corr.Y.Cy[,1:2], "./data/cca_pop_correlations_env.csv", row.names = T)
+```
+
+```{r CANCOR analyses reusult}
+cca$CanCorr
+# cca$Eigenvalues
+sum(cca$Eigenvalues[1:2])/cca$Pillai
+sum(cca$Eigenvalues[1:35])/cca$Pillai
+
+```
+
+```{r Load_genotype_data, eval=FALSE, include=FALSE}
+### Load genotype data
+snps <- read.csv("TableS3.csv", header = T) # Available from the Dryad Digital Repository, https://doi.org/10.5061/dryad.0p2ngf1xk
+
+```
+
+```{r, message=FALSE}
+## Removing loci with freq < MAF (Minor Allele Frequency)
+MAF <- 0.05
+frequences <- colSums(snps)/(nrow(snps))
+maf <- which(frequences > MAF & frequences < (1-MAF))
+snps_MAF005 <- snps[,maf]
+
+MAF <- 0.1
+frequences <- colSums(snps)/(nrow(snps))
+maf <- which(frequences > MAF & frequences < (1-MAF))
+snps_MAF01 <- snps[,maf]
+```
+
+```{r MM_env_effect, eval=FALSE, include=FALSE}
+env_eff_matrix <- matrix(nrow=dim(snps)[2], ncol=dim(env_data)[2])
+colnames(env_eff_matrix) <- colnames(env_data)
+rownames(env_eff_matrix) <- colnames(snps)
+for (i in 1:dim(env_eff_matrix)[2]){
+ preg <- lm(snps~env_data[,colnames(env_data)[i]])
+ env_eff_matrix[,colnames(env_data)[i]] <- preg$coefficients[2,]
+}
+env_eff_matrix <- as.data.frame(env_eff_matrix)
+
+
+env_eff_matrix_MAF005 <- matrix(nrow=dim(snps_MAF005)[2], ncol=dim(env_data)[2])
+colnames(env_eff_matrix_MAF005) <- colnames(env_data)
+rownames(env_eff_matrix_MAF005) <- colnames(snps_MAF005)
+for (i in 1:dim(env_eff_matrix_MAF005)[2]){
+ preg <- lm(snps_MAF005~env_data[,colnames(env_data)[i]])
+ env_eff_matrix_MAF005[,colnames(env_data)[i]] <- preg$coefficients[2,]
+}
+env_eff_matrix_MAF005 <- as.data.frame(env_eff_matrix_MAF005)
+
+
+env_eff_matrix_MAF01 <- matrix(nrow=dim(snps_MAF01)[2], ncol=dim(env_data)[2])
+colnames(env_eff_matrix_MAF01) <- colnames(env_data)
+rownames(env_eff_matrix_MAF01) <- colnames(snps_MAF01)
+for (i in 1:dim(env_eff_matrix_MAF01)[2]){
+ preg <- lm(snps_MAF01~env_data[,colnames(env_data)[i]])
+ env_eff_matrix_MAF01[,colnames(env_data)[i]] <- preg$coefficients[2,]
+}
+env_eff_matrix_MAF01 <- as.data.frame(env_eff_matrix_MAF01)
+```
+
+```{r MM_pheno_effect, eval=FALSE, include=FALSE}
+pheno_eff_matrix <- matrix(nrow=dim(snps)[2], ncol=dim(pheno_data)[2])
+colnames(pheno_eff_matrix) <- colnames(pheno_data)
+rownames(pheno_eff_matrix) <- colnames(snps)
+for (i in 1:dim(pheno_eff_matrix)[2]){
+ preg <- lm(snps~pheno_data[,colnames(pheno_data)[i]])
+ pheno_eff_matrix[,colnames(pheno_data)[i]] <- preg$coefficients[2,]
+}
+pheno_eff_matrix <- as.data.frame(pheno_eff_matrix)
+
+
+pheno_eff_matrix_MAF005 <- matrix(nrow=dim(snps_MAF005)[2], ncol=dim(pheno_data)[2])
+colnames(pheno_eff_matrix_MAF005) <- colnames(pheno_data)
+rownames(pheno_eff_matrix_MAF005) <- colnames(snps_MAF005)
+for (i in 1:dim(pheno_eff_matrix_MAF005)[2]){
+ preg <- lm(snps_MAF005~pheno_data[,colnames(pheno_data)[i]])
+ pheno_eff_matrix_MAF005[,colnames(pheno_data)[i]] <- preg$coefficients[2,]
+}
+pheno_eff_matrix_MAF005 <- as.data.frame(pheno_eff_matrix_MAF005)
+
+
+pheno_eff_matrix_MAF01 <- matrix(nrow=dim(snps_MAF01)[2], ncol=dim(pheno_data)[2])
+colnames(pheno_eff_matrix_MAF01) <- colnames(pheno_data)
+rownames(pheno_eff_matrix_MAF01) <- colnames(snps_MAF01)
+for (i in 1:dim(pheno_eff_matrix_MAF01)[2]){
+ preg <- lm(snps_MAF01~pheno_data[,colnames(pheno_data)[i]])
+ pheno_eff_matrix_MAF01[,colnames(pheno_data)[i]] <- preg$coefficients[2,]
+}
+pheno_eff_matrix_MAF01 <- as.data.frame(pheno_eff_matrix_MAF01)
+
+```
+
+```{r scale_env_eff_matrix}
+env_eff_matrix_sc <- scale(env_eff_matrix)
+env_eff_matrix_sc_MAF005 <- scale(env_eff_matrix_MAF005)
+env_eff_matrix_sc_MAF01 <- scale(env_eff_matrix_MAF01)
+
+# check that we get mean of 0 and sd of 1
+colMeans(env_eff_matrix_sc_MAF01)  # faster version of apply(scaled.dat, 2, mean)
+apply(env_eff_matrix_sc_MAF01, 2, sd, na.rm = T)
+```
+
+```{r scale_pheno_eff_matrix}
+pheno_eff_matrix_sc <- scale(pheno_eff_matrix)
+pheno_eff_matrix_sc_MAF005 <- scale(pheno_eff_matrix_MAF005)
+pheno_eff_matrix_sc_MAF01 <- scale(pheno_eff_matrix_MAF01)
+
+# check that we get mean of 0 and sd of 1
+colMeans(pheno_eff_matrix_sc_MAF01)  # faster version of apply(scaled.dat, 2, mean)
+apply(pheno_eff_matrix_sc_MAF01, 2, sd, na.rm = T)
+```
+
+```{r cc_snps}
+### Canonical correlation 
+
+cca_snps <- CCorA(env_eff_matrix_sc, pheno_eff_matrix_sc, stand.Y=FALSE, stand.X=FALSE, permutations = 0)
+cca_snps_MAF005 <- CCorA(env_eff_matrix_sc_MAF005, pheno_eff_matrix_sc_MAF005, stand.Y=FALSE, stand.X=FALSE, permutations = 0)
+cca_snps_MAF01 <- CCorA(env_eff_matrix_sc_MAF01, pheno_eff_matrix_sc_MAF01, stand.Y=FALSE, stand.X=FALSE, permutations = 0)
+
+# biplot(cca_snps_MAF01, plot.type = "biplots", xlabs = NULL)
+``` 
+
+## Post treatment of CANCOR results
+
+```{r, message=FALSE}
+# The function returning p-values and q-values for all the loci with ordinary lambda
+
+CANCORtest<-function(cca_snps,K)
+{
+  loadings<-cca_snps$Cx[,1:as.numeric(K)]
+  resscale <- apply(loadings, 2, scale)
+  resmaha <- covRob(resscale, distance = TRUE, na.action= na.omit, estim="pairwiseGK")$dist
+  lambda <- median(resmaha)/qchisq(0.5,df=K)
+  reschi2test <- pchisq(resmaha/lambda,K,lower.tail=FALSE)
+  qval <- qvalue(reschi2test)
+  q.values_rdadapt<-qval$qvalues
+  return(data.frame(loci=rownames(cca_snps$Cx), p.values=reschi2test, q.values=q.values_rdadapt))
+}
+
+```
+
+```{r, message=FALSE}
+# Checking alternative MAF and K values 
+x1<-CANCORtest(cca_snps_MAF005, 8)
+x2<-CANCORtest(cca_snps_MAF005, 4)
+x3<-CANCORtest(cca_snps_MAF005, 2)
+
+x4<-CANCORtest(cca_snps_MAF01, 8)
+x5<-CANCORtest(cca_snps_MAF01, 4)
+x6<-CANCORtest(cca_snps_MAF01, 2)
+
+x7<-CANCORtest(cca_snps, 8)
+x8<-CANCORtest(cca_snps, 4)
+x9<-CANCORtest(cca_snps, 2)
+
+#Histogram of p-values
+par(mfrow = c(3, 3))
+hist(x1$p.values, xlab="p-values", main="K8 min MAF = 0.05", breaks = 50, col = "orange")
+hist(x2$p.values, xlab="p-values", main="K4 min MAF = 0.05", breaks = 50, col = "orange")
+hist(x3$p.values, xlab="p-values", main="K2 min MAF = 0.05", breaks = 50, col = "orange")
+hist(x4$p.values, xlab="p-values", main="K8 min MAF = 0.1", breaks = 50, col = "orange")
+hist(x5$p.values, xlab="p-values", main="K4 min MAF = 0.1", breaks = 50, col = "orange")
+hist(x6$p.values, xlab="p-values", main="K2 min MAF = 0.1", breaks = 50, col = "orange")
+hist(x7$p.values, xlab="p-values", main="K8 min MAF = 0.0", breaks = 50, col = "orange")
+hist(x8$p.values, xlab="p-values", main="K4 min MAF = 0.0", breaks = 50, col = "orange")
+hist(x9$p.values, xlab="p-values", main="K2 min MAF = 0.0", breaks = 50, col = "orange")
+par(mfrow = c(1, 1))
+```
+
+## Visualisation of the results
+
+```{r, message=FALSE}
+# Manhattan plot K2 min MAF=0.1 (outliers : q.value < 0.1 are colored in orange)
+```
+```{r, echo=TRUE, fig.align="center", fig.width=8, fig.height=8}
+ggplot() +
+  geom_point(aes(x=c(1:length(x6[,2])), y=-log10(x6[,2])), col = "gray83") +
+  geom_point(aes(x=c(1:length(x6[,2]))[which(x6[,3] < 0.1)], y=-log10(x6[which(x6[,3] < 0.1),2])), col = "red") +
+  xlab("SNPs") + ylab("-log10(p.values)") +
+  theme_bw()
+```
+##
+```{r, message=FALSE}
+# Outliers loci (q.values < 0.1)
+
+length(which(x6[,3] < 0.1))
+length(which(x6[,3] > 0.1))
+
+# Candidates, p-values and q-values
+View(x6[x6[,3] < 0.1,])
+
+test_pass <- as.character(x6[x6[,3] < 0.1,]$loci)
+```
+
+
+```{r}
+#CANCOR plot - CANCOR outliers highlighted
+
+snps2 <- as.data.frame(t(snps_MAF01))
+snps2$CANCOR_test <- ifelse(rownames(snps2) %in% test_pass, "CANCOR_significant","CANCOR_not_significant")
+length(which(snps2$CANCOR_test == "GWAS_significant"))
+
+snps2$CANCOR_test <- as.factor(snps2$CANCOR_test)
+levels(snps2$CANCOR_test) 
+
+colorby <- snps2$CANCOR_test
+bg <- c(makeTransparent("grey", alpha =0), "darkorchid1")
+col <- c(makeTransparent("grey", alpha =0), "black") 
+
+
+par(pty="s")
+plot(cca_snps_MAF01$Cx[,c(1,2)], asp = 1, pch=21, col=makeTransparent("black"), cex=.5, bg=makeTransparent("grey"), lwd =.0001)
+points(cca_snps_MAF01$Cx[,c(1,2)], pch=21, col=col[colorby], cex=0.5, bg=bg[colorby],lwd =.0001) # the GWAS-significant adaptive loci
+biplot(x=cca_snps_MAF01, plot.type = "variables", col.Y = "indianred3", col.X = "#0868ac", cex = c(1,0.2), plot.axes = c(1,2), int = .9)
+```
+
+```{r}
+View(sort(abs(cca_snps_MAF01$corr.Y.Cy[,1]), decreasing = T))
+View(sort(abs(cca_snps_MAF01$corr.Y.Cy[,2]), decreasing = T))
+View(sort(abs(cca_snps_MAF01$corr.Y.Cy[,3]), decreasing = T))
+View(sort(abs(cca_snps_MAF01$corr.Y.Cy[,4]), decreasing = T))
+
+View(sort(abs(cca_snps_MAF01$corr.X.Cx[,1]), decreasing = T))
+View(sort(abs(cca_snps_MAF01$corr.X.Cx[,2]), decreasing = T))
+View(sort(abs(cca_snps_MAF01$corr.X.Cx[,3]), decreasing = T))
+
+
+write.csv2(cca_snps_MAF01$corr.X.Cx[,c(1,2)], "./data/cca_all_snp_correlations_pheno_1_2.csv", row.names = T)
+write.csv2(cca_snps_MAF01$corr.Y.Cy[,c(1,2)], "./data/cca_all_snp_correlations_env_1_2.csv", row.names = T)
+
+# Table of object scores in env variable plot (Y)
+write.csv2(cca_snps_MAF01$Cy[,c(1,2)], "./data/cca_snp_all_scores_Y_plot_1_2.csv", row.names = T)
+```
+
+```{r CANCOR analyses reusult}
+cca_snps_MAF01$CanCorr
+# cca_snps_MAF01$Eigenvalues
+sum(cca_snps_MAF01$Eigenvalues[1:2])/cca_snps$Pillai
+sum(cca_snps_MAF01$Eigenvalues[1:38])/cca_snps$Pillai
+```
+
+## CANDIDATES data frame
+```{r load_rda_axis, eval=FALSE, include=FALSE}
+load.cancor <- cca_snps_MAF01$Cx[,1:2]  # Species scores for the first two constrained axes of the phenotype data table
+load.cancor_pass <- load.cancor[rownames(load.cancor) %in% test_pass, ]
+```
+
+Let's add in the correlations of each candidate SNP with the 112 environmental predictors:
+```{r, outliers_df2}
+foo <- matrix(nrow=nrow(load.cancor_pass), ncol=112)  # 112 columns for 112 predictors
+colnames(foo) <- colnames(env_data) 
+
+for (i in 1:length(rownames(load.cancor_pass))) {
+  nam <- rownames(load.cancor_pass)[i]
+  snp.gen <- snps[,nam]
+  foo[i,] <- apply(env_data,2,function(x) {
+  cor.result<- cor.test(x,snp.gen)
+  cor.result$estimate
+    # estimate <- cor.result$estimate)
+})
+}
+cand <- cbind.data.frame(load.cancor_pass,foo)  
+head(cand)
+```
+Now we have a data frame of 631 candidate SNPs and their correlation with our 112 environmental predictors.
+
+
+Let's add in the correlation p-values of each candidate SNP with the 112 environmental predictors:
+```{r, outliers_pvalue_df2}
+foo_pvalue <- matrix(nrow=nrow(load.cancor_pass), ncol=112)  # 112 columns for 112 predictors
+colnames(foo_pvalue) <- colnames(env_data) 
+
+for (i in 1:length(rownames(load.cancor_pass))) {
+  nam <- rownames(load.cancor_pass)[i]
+  snp.gen <- snps[,nam]
+  foo_pvalue[i,] <- apply(env_data,2,function(x) {
+  cor.result<- cor.test(x,snp.gen)
+  cor.result$p.value
+    # estimate <- cor.result$estimate)
+})
+}
+cand_pvalues <- cbind.data.frame(load.cancor_pass,foo_pvalue)  
+head(cand_pvalues)
+```
+Now we have a data frame of 631 candidate SNPs and their correlation test pvalues with our 112 environmental predictors.
+
+## Investigate the candidates 
+
+Next, we'll see which of the predictors each candidate SNP is correlated with:
+```{r, correlations}
+for (i in 1:length(rownames(cand))) {
+  bar <- cand[i,]
+  ids_pos <- which(bar[3:114] > 0.5,arr.ind=TRUE) # gives the variable
+  ids_neg <- which(bar[3:114] < -0.5,arr.ind=TRUE) # gives the variable
+
+  cand[i,115] <- paste(colnames(bar[3:114])[ids_pos[,"col"]], collapse = ",")
+  cand[i,116] <- paste(colnames(bar[3:114])[ids_neg[,"col"]], collapse = ",")
+
+}
+
+colnames(cand)[115] <- "Highly positively correlated with (Environmental variable)"
+colnames(cand)[116] <- "Highly negatively correlated with (Environmental variable)"
+
+head(cand, n=100) 
+```
+Most of the candidates are correlated with several environmental variables
+
+
+Next, we'll see which of the predictors each candidate SNP is MOST STRONGLY correlated with:
+```{r, correlations2}
+for (i in 1:length(rownames(cand))) {
+  bar <- cand[i,]
+  cand[i,117] <- names(which.max(abs(bar[3:114]))) # gives the variable
+  cand[i,118] <- max(abs(bar[3:114]))              # gives the correlation
+}
+
+colnames(cand)[117] <- "Environmental variable (strongest correlation)"
+colnames(cand)[118] <- "Correlation value (Environmental variable)"
+
+head(cand, n=100)
+```
+
+Let's add in the correlations of each candidate SNP with the 145 phenotypic traits:
+```{r, outliers_df2b}
+foo <- matrix(nrow=nrow(load.cancor_pass), ncol=145)  # 145 columns for 145 predictors
+colnames(foo) <- colnames(pheno_data) 
+
+for (i in 1:length(rownames(load.cancor_pass))) {
+  nam <- rownames(load.cancor_pass)[i]
+  snp.gen <- snps[,nam]
+  foo[i,] <- apply(pheno_data,2,function(x) {
+  cor.result<- cor.test(x,snp.gen)
+  cor.result$estimate
+    # estimate <- cor.result$estimate
+})
+}
+candb <- cbind.data.frame(load.cancor_pass,foo)  
+head(candb)
+```
+Now we have a data frame of 631 candidate SNPs and their correlation with our 145 environmental predictors.
+
+Let's add in the correlation p-values of each candidate SNP with the 145 environmental predictors:
+```{r, outliers_pvalue_df2b}
+foo_pvalue <- matrix(nrow=nrow(load.cancor_pass), ncol=145)  # 145 columns for 145 predictors
+colnames(foo_pvalue) <- colnames(pheno_data) 
+
+for (i in 1:length(rownames(load.cancor_pass))) {
+  nam <- rownames(load.cancor_pass)[i]
+  snp.gen <- snps[,nam]
+  foo_pvalue[i,] <- apply(pheno_data,2,function(x) {
+  cor.result<- cor.test(x,snp.gen)
+  cor.result$p.value
+    # estimate <- cor.result$estimate)
+})
+}
+cand_pvaluesb <- cbind.data.frame(load.cancor_pass,foo_pvalue)  
+head(cand_pvaluesb)
+```
+Now we have a data frame of 631 candidate SNPs and their correlation test pvalues with our 145 environmental predictors.
+
+## Investigate the candidates 
+
+Next, we'll see which of the predictors each candidate SNP is correlated with r>0.5:
+```{r, correlationsb}
+for (i in 1:length(rownames(candb))) {
+  bar <- candb[i,]
+  ids_pos <- which(bar[3:147] > 0.5,arr.ind=TRUE) # gives the variable
+  ids_neg <- which(bar[3:147] < -0.5,arr.ind=TRUE) # gives the variable
+
+  candb[i,148] <- paste(colnames(bar[3:147])[ids_pos[,"col"]], collapse = ",")
+  candb[i,149] <- paste(colnames(bar[3:147])[ids_neg[,"col"]], collapse = ",")
+
+}
+
+colnames(candb)[148] <- "Highly positively correlated with (Phenotypic variable)"
+colnames(candb)[149] <- "Highly negatively correlated with (Phenotypic variable)"
+
+head(candb, n=100) 
+```
+
+Most of the candidates are correlated with several phenotypic variables
+
+Next, we'll see which of the predictors each candidate SNP is MOST STRONGLY correlated with:
+```{r, correlations2b}
+for (i in 1:length(rownames(candb))) {
+  bar <- candb[i,]
+  candb[i,150] <- names(which.max(abs(bar[3:147]))) # gives the variable
+  candb[i,151] <- max(abs(bar[3:147]))              # gives the correlation
+}
+
+colnames(candb)[150] <- "Phenotypic variable (strongest correlation)"
+colnames(candb)[151] <- "Correlation value (Phenotypic variable)"
+
+head(candb, n=100)
+```
+
+```{r, correlations3}
+cand2 <- cbind(cand[,c(1:2,115:116)], candb[,c(148:149)], stringsAsFactors=F)
+
+head(cand2, n=100)
+
+```
+
+
+## Plot the SNPs
+Let's look at CANCOR plots again, but this time focus in on the SNPs in the ordination space. We'll color code the SNPs based on the predictor variable that they are most strongly correlated with. 
+```{r, snp.plot1, fig.width=16, fig.height=16, fig.show='hold'}
+clim_vector_lenght_on_plane_1_2 <- sqrt((abs(cca_snps$corr.Y.Cy[,1])^2) + (abs(cca_snps$corr.Y.Cy[,2])^2))
+clim_high_vector_lenght_on_plane_1_2 <- names(clim_vector_lenght_on_plane_1_2[clim_vector_lenght_on_plane_1_2 > 0.95])
+
+pheno_vector_lenght_on_plane_1_2 <- sqrt((abs(cca_snps$corr.X.Cx[,1])^2) + (abs(cca_snps$corr.X.Cx[,2])^2))
+pheno_high_vector_lenght_on_plane_1_2 <- names(pheno_vector_lenght_on_plane_1_2[pheno_vector_lenght_on_plane_1_2 > 0.9])
+
+#Add extra variables not reaching 0.9 length but representative of al portions of the plane
+
+clim <- sort(c(clim_high_vector_lenght_on_plane_1_2, "daily_ws", "dgrb"))
+pheno <- sort(c(pheno_high_vector_lenght_on_plane_1_2, "HEA_avg", "HFY_avg", "WSC_avg", "PRT_avg", "NSL_lu17"))
+
+png("data/CANCOR_outliers_clim.png",width=16,height=16, units = "in", res = 600)
+par(pty="s", mfrow=c(6,4))
+
+for (i in 1:length(clim)){
+cand2[[clim[i]]] <- ifelse(grepl(clim[i], cand2$`Highly positively correlated with (Environmental variable)`), clim[i],NA)
+cand2[[clim[i]]] <- as.factor(cand2[[clim[i]]])
+
+colorby <- cand2[[clim[i]]]
+bg <- c("darkorchid1") # colors of our clusters
+col <- c("black") # colors of our clusters
+
+cand2[[clim[i]]] <- ifelse(grepl(clim[i], cand2$`Highly negatively correlated with (Environmental variable)`), clim[i],NA)
+cand2[[clim[i]]] <- as.factor(cand2[[clim[i]]])
+
+colorby2 <- cand2[[clim[i]]]
+bg2 <- c("springgreen") # colors of our clusters
+
+plot(cca_snps_MAF01$Cx[,c(1,2)], asp = 1, pch=21, col=makeTransparent("black"), cex=.5, bg=makeTransparent("grey"), lwd =.0001, main=clim[i])
+points(cca_snps_MAF01$Cx[,c(1,2)][rownames(cca_snps_MAF01$Cx[,c(1,2)]) %in% rownames(cand2), ], pch=21, col=coalesce(col[colorby],col[colorby2]), cex=1, bg=coalesce(bg[colorby],bg2[colorby2]),lwd =.0001) # the GWAS-significant adaptive loci
+
+}
+
+dev.off()
+
+png("data/CANCOR_outliers_pheno.png",width=16,height=16, units = "in", res = 600)
+par(pty="s", mfrow=c(8,4))
+
+for (i in 1:length(pheno)){
+cand2[[pheno[i]]] <- ifelse(grepl(pheno[i], cand2$`Highly positively correlated with (Phenotypic variable)`), pheno[i],NA)
+cand2[[pheno[i]]] <- as.factor(cand2[[pheno[i]]])
+
+colorby <- cand2[[pheno[i]]]
+bg <- c("darkorchid1") # colors of our clusters
+col <- c("black") # colors of our clusters
+
+cand2[[pheno[i]]] <- ifelse(grepl(pheno[i], cand2$`Highly negatively correlated with (Phenotypic variable)`), pheno[i],NA)
+cand2[[pheno[i]]] <- as.factor(cand2[[pheno[i]]])
+
+colorby2 <- cand2[[pheno[i]]]
+bg2 <- c("springgreen") # colors of our clusters
+
+plot(cca_snps_MAF01$Cx[,c(1,2)], asp = 1, pch=21, col=makeTransparent("black"), cex=.5, bg=makeTransparent("grey"), lwd =.0001, main=pheno[i])
+points(cca_snps_MAF01$Cx[,c(1,2)][rownames(cca_snps_MAF01$Cx[,c(1,2)]) %in% rownames(cand2), ], pch=21, col=coalesce(col[colorby],col[colorby2]), cex=1, bg=coalesce(bg[colorby],bg2[colorby2]),lwd =.0001) # the GWAS-significant adaptive loci
+
+}
+
+dev.off()
+
+#Remove variables with trait values not reaching 0.5 of correlation value with outlier allele frequencies
+
+clim2 <- clim[!clim %in% c("dgrb","daily_ws", "pr_au")]
+
+pheno2 <- pheno[!pheno %in% c("AHD_avg","CH300h_po17", "DES_po15", "DHE_01_lu16", "DVG_04_lu17", "HFY_avg", "NSL_lu17", "PRT_avg", "resCH300h_po17", "resCH400h_po17", "SCD_su15_lu", "VAS_po15", "WSC_avg")]
+
+png("D:/Work data/Analyses/2016/2016_08_25_LoliumLandscapeGenetics/R/data/CANCOR_outliers_clim2b.png",width=6.95,height=16, units = "in", res = 600)
+par(pty="s", mfrow=c(7,3))
+
+for (i in 1:length(clim2)){
+cand2[[clim2[i]]] <- ifelse(grepl(clim2[i], cand2$`Highly positively correlated with (Environmental variable)`), clim2[i],NA)
+cand2[[clim2[i]]] <- as.factor(cand2[[clim2[i]]])
+
+colorby <- cand2[[clim2[i]]]
+bg <- c("darkorchid1") # colors of our clusters
+col <- c("black") # colors of our clusters
+
+cand2[[clim2[i]]] <- ifelse(grepl(clim2[i], cand2$`Highly negatively correlated with (Environmental variable)`), clim2[i],NA)
+cand2[[clim2[i]]] <- as.factor(cand2[[clim2[i]]])
+
+colorby2 <- cand2[[clim2[i]]]
+bg2 <- c("springgreen") # colors of our clusters
+
+plot(cca_snps_MAF01$Cy[,c(1,2)], asp = 1, pch=21, col=makeTransparent("black"), cex=.5, bg=makeTransparent("grey"), lwd =.0001, main=clim2[i])
+points(cca_snps_MAF01$Cy[,c(1,2)][rownames(cca_snps_MAF01$Cy[,c(1,2)]) %in% rownames(cand2), ], pch=21, col=coalesce(col[colorby],col[colorby2]), cex=1, bg=coalesce(bg[colorby],bg2[colorby2]),lwd =.0001) # the GWAS-significant adaptive loci
+
+}
+
+dev.off()
+
+png("data/CANCOR_outliers_pheno2b.png",width=6.95,height=16, units = "in", res = 600)
+par(pty="s", mfrow=c(7,3))
+
+for (i in 1:length(pheno2)){
+cand2[[pheno2[i]]] <- ifelse(grepl(pheno2[i], cand2$`Highly positively correlated with (Phenotypic variable)`), pheno2[i],NA)
+cand2[[pheno2[i]]] <- as.factor(cand2[[pheno2[i]]])
+
+colorby <- cand2[[pheno2[i]]]
+bg <- c("darkorchid1") # colors of our clusters
+col <- c("black") # colors of our clusters
+
+cand2[[pheno2[i]]] <- ifelse(grepl(pheno2[i], cand2$`Highly negatively correlated with (Phenotypic variable)`), pheno2[i],NA)
+cand2[[pheno2[i]]] <- as.factor(cand2[[pheno2[i]]])
+
+colorby2 <- cand2[[pheno2[i]]]
+bg2 <- c("springgreen") # colors of our clusters
+
+plot(cca_snps_MAF01$Cx[,c(1,2)], asp = 1, pch=21, col=makeTransparent("black"), cex=.5, bg=makeTransparent("grey"), lwd =.0001, main=pheno2[i])
+points(cca_snps_MAF01$Cx[,c(1,2)][rownames(cca_snps_MAF01$Cx[,c(1,2)]) %in% rownames(cand2), ], pch=21, col=coalesce(col[colorby],col[colorby2]), cex=1, bg=coalesce(bg[colorby],bg2[colorby2]),lwd =.0001) # the GWAS-significant adaptive loci
+
+}
+
+dev.off()
+```
