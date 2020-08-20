@@ -6,5 +6,7 @@ CANCOR is a multivariate analysis that reveals the co-inertia between two tables
 
 Please cite the publication below if you cite this code:
 
+...Accepted for publication pending revision...
+
 
 https://doi.org/10.5281/zenodo.3992813
