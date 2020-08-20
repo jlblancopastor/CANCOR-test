@@ -28,4 +28,4 @@ See within the Rmarkdown document for information on usage, dependencies, etc.
 DOI
 --------
 
-[![DOI](https://doi.org/10.5281/zenodo.3992813)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3992813.svg)](https://doi.org/10.5281/zenodo.3992813)
