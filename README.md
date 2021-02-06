@@ -17,8 +17,7 @@ Citation
 
 If you use scripts from this repository for your own research, please cite the associated publication.
 
-...Accepted for publication in MER pending revision...
-
+Blanco‐Pastor, JL, Barre, P, Keep, T, et al. Canonical correlations reveal adaptive loci and phenotypic responses to climate in perennial ryegrass. Mol Ecol Resour. 2020; 00: 1– 22. https://doi.org/10.1111/1755-0998.13289
 
 Usage, etc.
 --------
