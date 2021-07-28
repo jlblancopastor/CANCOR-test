@@ -128,7 +128,7 @@ sum(cca$Eigenvalues[1:35])/cca$Pillai
 
 ```{r Load_genotype_data, eval=FALSE, include=FALSE}
 ### Load genotype data
-snps <- read.csv("TableS3.csv", header = T) # Available from the Dryad Digital Repository, https://doi.org/10.5061/dryad.0p2ngf1xk
+snps <- read.csv("DataS1.csv", header = T) # Available from the Dryad Digital Repository, https://doi.org/10.5061/dryad.0p2ngf1xk
 
 ```
 
